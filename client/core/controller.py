@@ -63,9 +63,12 @@ class Controller:
         sess = self.get_session(friend)
         if not sess: return
         packet = sess.encrypt(text.encode())
-        payload = {"to_user": friend, "encrypted_content": packet['iv'] + packet['tag'] + packet['ciphertext'], "header": packet['header']}
+        blob = packet['iv'] + packet['tag'] + packet['ciphertext']
+        payload = {"to_user": friend, "encrypted_content": blob, "header": packet['header']}
+        
         if self.net.post("/send", payload):
-            self.vault.save_message(friend, text, True) # Lưu lịch sử
+            # Ghi vào DB cục bộ
+            self.vault.save_message(friend, text, True)
             self.vault.save_session(friend, sess.get_state())
             self.app.on_new_message(friend, text, True)
 
@@ -75,14 +78,17 @@ class Controller:
         file_name = os.path.basename(file_path)
         with open(file_path, "rb") as f:
             content = base64.b64encode(f.read()).decode()
+        
         raw_data = f"FILE_SHARE|{file_name}|{content}"
         packet = sess.encrypt(raw_data.encode())
-        payload = {"to_user": friend, "encrypted_content": packet['iv'] + packet['tag'] + packet['ciphertext'], "header": packet['header']}
+        blob = packet['iv'] + packet['tag'] + packet['ciphertext']
+        payload = {"to_user": friend, "encrypted_content": blob, "header": packet['header']}
+        
         if self.net.post("/send", payload):
-            display_text = f"FILE_SHARE|{file_name}|{content}"
-            self.vault.save_message(friend, display_text, True) # Lưu lịch sử file
+            # Ghi vào DB cục bộ dạng marker file
+            self.vault.save_message(friend, raw_data, True)
             self.vault.save_session(friend, sess.get_state())
-            self.app.on_new_message(friend, display_text, True)
+            self.app.on_new_message(friend, raw_data, True)
 
     def start_polling(self):
         threading.Thread(target=self._poll_loop, daemon=True).start()

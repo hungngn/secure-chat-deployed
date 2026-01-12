@@ -44,11 +44,23 @@ class ChatScreen(ctk.CTkFrame):
         self.render_chat_list()
 
     def render_chat_list(self):
-        for child in self.sidebar_scroll.winfo_children(): child.destroy()
-        # Lấy tất cả người đã từng chat từ DB
-        cursor = self.controller.vault.conn.execute("SELECT DISTINCT friend_id FROM chat_history")
-        for (friend,) in cursor.fetchall():
-            btn = ctk.CTkButton(self.sidebar_scroll, text=f"👤 {friend}", fg_color="transparent", text_color="white", anchor="w", command=lambda f=friend: self.switch_chat(f))
+        for child in self.sidebar_scroll.winfo_children():
+            child.destroy()
+        
+        # Lấy danh sách những người bạn đã từng có lịch sử chat
+        try:
+            cursor = self.controller.vault.conn.execute("SELECT DISTINCT friend_id FROM chat_history")
+            friends = [row[0] for row in cursor.fetchall()]
+        except:
+            friends = []
+
+        for f in friends:
+            btn = ctk.CTkButton(
+                self.sidebar_scroll, text=f"👤 {f}", 
+                fg_color="transparent", text_color="white", anchor="w",
+                hover_color="#2D3648",
+                command=lambda name=f: self.switch_chat(name)
+            )
             btn.pack(fill="x", padx=5, pady=2)
 
     def switch_chat(self, friend_name):
