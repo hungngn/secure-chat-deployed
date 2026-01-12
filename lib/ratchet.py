@@ -1,5 +1,5 @@
 from Crypto.Hash import HMAC, SHA256
-from .crypto import (
+from lib.crypto import (
     generate_dh_keypair, compute_dh, encrypt_gcm, decrypt_gcm,
     load_dh_keypair 
 )

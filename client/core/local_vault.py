@@ -1,4 +1,3 @@
-# client/core/local_vault.py
 import sqlite3
 import json
 

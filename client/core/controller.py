@@ -2,8 +2,8 @@ import os
 import base64
 import threading
 import time
-from .local_vault import LocalVault
-from .network import NetworkClient
+from client.core.local_vault import LocalVault
+from client.core.network import NetworkClient
 from lib.crypto import generate_identity_keys, generate_dh_keypair
 from lib.ratchet import RatchetSession
 

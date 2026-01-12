@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from .models import RegisterRequest, SendMessageRequest
-from .database import init_db, add_user, get_user, save_msg, fetch_msgs
+from server.models import RegisterRequest, SendMessageRequest
+from server.database import init_db, add_user, get_user, save_msg, fetch_msgs
 from lib.crypto import verify_signature
 
 app = FastAPI()

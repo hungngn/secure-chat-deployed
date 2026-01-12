@@ -1,7 +1,7 @@
 import customtkinter as ctk
 from client.core.controller import Controller
-from .login_screen import LoginScreen
-from .chat_screen import ChatScreen
+from client.gui.login_screen import LoginScreen
+from client.gui.chat_screen import ChatScreen
 
 class App(ctk.CTk):
     def __init__(self):
