@@ -87,6 +87,7 @@ class Controller:
         sess = self.get_session(friend)
         if not sess: return
         packet = sess.encrypt(text.encode())
+        
         full_blob = packet['iv'] + packet['tag'] + packet['ciphertext']
         payload = {
             "to_user": friend,
@@ -94,6 +95,8 @@ class Controller:
             "header": packet['header']
         }
         self.net.post("/send", payload)
+        
+        # CỰC KỲ QUAN TRỌNG: Lưu ngay lập tức
         self.vault.save_session(friend, sess.get_state())
         self.app.on_new_message(friend, text, True)
 
@@ -120,8 +123,8 @@ class Controller:
                         
                         try:
                             plaintext = sess.decrypt(packet)
-                            self.app.on_new_message(sender, plaintext.decode(), False)
-                            # CỰC KỲ QUAN TRỌNG: Lưu lại state đã có ck_s để Bob có thể phản hồi
+                            msg_text = plaintext.decode() # Giữ nguyên chuỗi thô để GUI check marker
+                            self.app.on_new_message(sender, msg_text, False)
                             self.vault.save_session(sender, sess.get_state())
                         except Exception as e:
                             print(f"Decryption Error: {e}")

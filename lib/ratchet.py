@@ -1,4 +1,3 @@
-# lib/ratchet.py
 from Crypto.Hash import HMAC, SHA256
 from .crypto import (
     generate_dh_keypair, compute_dh, encrypt_gcm, decrypt_gcm,
@@ -7,7 +6,7 @@ from .crypto import (
 import json
 
 class RatchetSession:
-    SALT = b'SecureChat_V1_Initial_Salt'
+    SALT = b'Secret_Share_V1_Salt' # Đồng bộ lại Salt
 
     def __init__(self, rk=None, is_initiator=False, peer_pub=None, prekey_priv=None):
         self.rk = rk if rk else b'\x00' * 32
@@ -24,7 +23,7 @@ class RatchetSession:
             
         if is_initiator and peer_pub:
             secret = compute_dh(self.dh_pair, peer_pub)
-            # Khởi tạo chuỗi gửi ngay lập tức cho người chủ động
+            # Khởi tạo chuỗi rk và ck_s ban đầu
             self.rk, self.ck_s = self._kdf_root(self.SALT, secret)
 
     def _kdf_root(self, rk, dh_out):
@@ -33,24 +32,20 @@ class RatchetSession:
 
     def _kdf_chain(self, ck):
         if ck is None:
-            # Sửa lỗi: Thay vì báo lỗi, hãy cố gắng cảnh báo hoặc kiểm tra lại logic khởi tạo
-            raise ValueError("Chain Key is not initialized. Handshake might be incomplete.")
-        # Sử dụng đúng cú pháp HMAC.new static method
+            raise ValueError("Chưa thiết lập Chain Key!")
+        # Đảm bảo dùng đúng định dạng bytes cho hmac
         new_ck = HMAC.new(ck, b'\x01', SHA256).digest()
         mk = HMAC.new(ck, b'\x02', SHA256).digest()
         return new_ck, mk
 
     def encrypt(self, pt: bytes) -> dict:
-        # Đảm bảo ck_s tồn tại
-        if self.ck_s is None:
-             raise ValueError("Khởi tạo phiên chat thất bại: Thiếu khóa gửi (Chain Key S)")
-             
         self.ck_s, mk = self._kdf_chain(self.ck_s)
         header = {
             "dh_pub": self.dh_pair.get_public_key().to_string().hex(),
             "n": self.n_s
         }
         self.n_s += 1
+        # Sử dụng separators để tránh sai lệch khoảng trắng khi Server xử lý JSON
         ad = json.dumps(header, sort_keys=True, separators=(',', ':')).encode()
         iv, ct, tag = encrypt_gcm(mk, pt, associated_data=ad)
         
@@ -65,18 +60,20 @@ class RatchetSession:
         header = packet['header']
         remote_pub = bytes.fromhex(header['dh_pub'])
         
-        # Lưu state để rollback nếu fail
-        old_state = (self.rk, self.ck_r, self.ck_s, self.dh_remote)
+        # Lưu trạng thái để Rollback nếu giải mã thất bại (tránh lệch chuỗi)
+        old_state = (self.rk, self.ck_r, self.ck_s, self.dh_remote, self.dh_pair, self.n_r)
         
         try:
+            # Bước bắt tay đầu tiên cho người nhận
             if self.ck_r is None:
                 secret = compute_dh(self.dh_pair, remote_pub)
                 self.rk, self.ck_r = self._kdf_root(self.SALT, secret)
                 self.dh_remote = remote_pub
-                # Tự động tạo ck_s cho Bob để có thể phản hồi Alice ngay lập tức
+                # Chuẩn bị sẵn ck_s để phản hồi
                 self.dh_pair = generate_dh_keypair()
                 self.rk, self.ck_s = self._kdf_root(self.rk, compute_dh(self.dh_pair, self.dh_remote))
             
+            # Xoay khóa DH nếu đối phương đổi cặp khóa mới
             elif remote_pub != self.dh_remote:
                 self.rk, self.ck_r = self._kdf_root(self.rk, compute_dh(self.dh_pair, remote_pub))
                 self.dh_remote = remote_pub
@@ -84,28 +81,33 @@ class RatchetSession:
                 self.rk, self.ck_s = self._kdf_root(self.rk, compute_dh(self.dh_pair, self.dh_remote))
                 self.n_r = 0
 
-            self.ck_r, mk = self._kdf_chain(self.ck_r)
+            new_ck_r, mk = self._kdf_chain(self.ck_r)
             ad = json.dumps(header, sort_keys=True, separators=(',', ':')).encode()
             
-            return decrypt_gcm(mk, bytes.fromhex(packet['iv']), bytes.fromhex(packet['ciphertext']), 
-                             bytes.fromhex(packet['tag']), associated_data=ad)
+            plaintext = decrypt_gcm(
+                mk, 
+                bytes.fromhex(packet['iv']), 
+                bytes.fromhex(packet['ciphertext']), 
+                bytes.fromhex(packet['tag']), 
+                associated_data=ad
+            )
+            
+            # Chỉ khi giải mã thành công mới cập nhật chuỗi khóa
+            self.ck_r = new_ck_r
+            self.n_r += 1
+            return plaintext
+            
         except Exception as e:
-            self.rk, self.ck_r, self.ck_s, self.dh_remote = old_state
+            # Khôi phục trạng thái cũ nếu lỗi MAC (tránh hỏng session vĩnh viễn)
+            self.rk, self.ck_r, self.ck_s, self.dh_remote, self.dh_pair, self.n_r = old_state
             raise e
 
     def get_state(self):
         return {
-            "rk": self.rk.hex(), "dh_priv": self.dh_pair.private_key.to_string().hex(),
+            "rk": self.rk.hex(), 
+            "dh_priv": self.dh_pair.private_key.to_string().hex(),
             "dh_remote": self.dh_remote.hex() if self.dh_remote else None,
             "ck_s": self.ck_s.hex() if self.ck_s else None, 
             "ck_r": self.ck_r.hex() if self.ck_r else None,
             "ns": self.n_s, "nr": self.n_r
         }
-
-    def load_state(self, s):
-        self.rk = bytes.fromhex(s['rk'])
-        self.dh_pair = load_dh_keypair(s['dh_priv'])
-        self.dh_remote = bytes.fromhex(s['dh_remote']) if s['dh_remote'] else None
-        self.ck_s = bytes.fromhex(s['ck_s']) if s['ck_s'] else None
-        self.ck_r = bytes.fromhex(s['ck_r']) if s['ck_r'] else None
-        self.n_s, self.n_r = s['ns'], s['nr']
