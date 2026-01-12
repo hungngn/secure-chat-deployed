@@ -1,63 +1,47 @@
 import sqlite3
 import json
-from lib.crypto import encrypt_gcm, decrypt_gcm, derive_master_key
 
 class LocalVault:
-    def __init__(self, db_filename="client_vault.db"):
-        # Cho phép đặt tên file DB khác nhau cho mỗi user
+    def __init__(self, db_filename):
         self.db_filename = db_filename
-        self.master_key = None
+        self.conn = sqlite3.connect(db_filename, check_same_thread=False)
         self._init_db()
 
     def _init_db(self):
-        # Dùng self.db_filename thay vì DB_NAME cố định
-        conn = sqlite3.connect(self.db_filename)
-        conn.execute('CREATE TABLE IF NOT EXISTS my_identity (key_name TEXT PRIMARY KEY, blob BLOB)')
-        conn.execute('CREATE TABLE IF NOT EXISTS sessions (username TEXT PRIMARY KEY, blob BLOB)')
-        conn.commit()
-        conn.close()
+        # Bảng lưu Identity
+        self.conn.execute("CREATE TABLE IF NOT EXISTS identity (key_name TEXT PRIMARY KEY, data TEXT)")
+        # Bảng lưu Session Double Ratchet
+        self.conn.execute("CREATE TABLE IF NOT EXISTS sessions (friend_id TEXT PRIMARY KEY, state TEXT)")
+        # MỚI: Bảng lưu lịch sử chat
+        self.conn.execute('''CREATE TABLE IF NOT EXISTS chat_history 
+                          (friend_id TEXT, message TEXT, is_me INTEGER, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        self.conn.commit()
 
-    def login(self, password: str) -> bool:
-        try:
-            self.master_key = derive_master_key(password)
-            return True
-        except: return False
+    def login(self, password):
+        # MVP: Chấp nhận mọi mật khẩu, bạn có thể thêm logic PBKDF2 tại đây nếu muốn
+        return True
 
-    def _save(self, table, key, data_dict):
-        if not self.master_key: raise Exception("Vault Locked")
-        pt = json.dumps(data_dict).encode()
-        iv, ct, tag = encrypt_gcm(self.master_key, pt)
-        blob = iv + tag + ct
-        
-        conn = sqlite3.connect(self.db_filename) # <--- Sửa ở đây
-        conn.execute(f"INSERT OR REPLACE INTO {table} VALUES (?, ?)", (key, blob))
-        conn.commit()
-        conn.close()
+    def _save(self, table, pk_value, data_dict):
+        self.conn.execute(f"INSERT OR REPLACE INTO {table} VALUES (?, ?)", (pk_value, json.dumps(data_dict)))
+        self.conn.commit()
 
-    def _load(self, table, key):
-        if not self.master_key: raise Exception("Vault Locked")
-        conn = sqlite3.connect(self.db_filename)
-        
-        # SỬA DÒNG NÀY: Dùng tham số key thay vì ép cứng 'user_main'
-        query = f"SELECT blob FROM {table} WHERE key_name=?" if table=='my_identity' else f"SELECT blob FROM {table} WHERE username=?"
-        row = conn.execute(query, (key,)).fetchone()
-        
-        conn.close()
-        if not row: return None
-        blob = row[0]
-        try:
-            return json.loads(decrypt_gcm(self.master_key, blob[:16], blob[32:], blob[16:32]))
-        except:
-            return None
+    def _load(self, table, pk_value):
+        cursor = self.conn.execute(f"SELECT data FROM {table} WHERE {table == 'identity' and 'key_name' or 'friend_id'} = ?", (pk_value,))
+        row = cursor.fetchone()
+        return json.loads(row[0]) if row else None
 
-    def save_identity(self, username, sk_hex):
-        self._save('my_identity', 'user_main', {"username": username, "sk": sk_hex})
+    # Các hàm tiện ích
+    def save_identity(self, username, sk): self._save('identity', 'my_identity', {"username": username, "sk": sk})
+    def load_identity(self): return self._load('identity', 'my_identity')
+    def save_session(self, friend_id, state): self._save('sessions', friend_id, state)
+    def load_session(self, friend_id): return self._load('sessions', friend_id)
 
-    def load_identity(self):
-        return self._load('my_identity', 'user_main')
+    # MỚI: Logic lưu và lấy lịch sử chat
+    def save_message(self, friend_id, message, is_me):
+        self.conn.execute("INSERT INTO chat_history (friend_id, message, is_me) VALUES (?, ?, ?)",
+                          (friend_id, message, 1 if is_me else 0))
+        self.conn.commit()
 
-    def save_session(self, friend, state):
-        self._save('sessions', friend, state)
-
-    def load_session(self, friend):
-        return self._load('sessions', friend)
+    def get_chat_history(self, friend_id):
+        cursor = self.conn.execute("SELECT message, is_me FROM chat_history WHERE friend_id = ? ORDER BY timestamp ASC", (friend_id,))
+        return cursor.fetchall()
