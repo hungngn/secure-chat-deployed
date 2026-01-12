@@ -53,3 +53,11 @@ def load_dh_keypair(priv_hex: str):
     ecdh = ECDH(curve=SECP256k1)
     ecdh.private_key = sk
     return ecdh
+
+def file_to_bytes(file_path):
+    with open(file_path, "rb") as f:
+        return f.read()
+
+def bytes_to_file(data, save_path):
+    with open(save_path, "wb") as f:
+        f.write(data)

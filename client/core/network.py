@@ -3,7 +3,8 @@ import json
 import time
 from lib.crypto import sign_data
 
-BASE_URL = "http://127.0.0.1:8000"
+# THAY ĐỔI: Dán URL từ Render của bạn vào đây (nhớ giữ https và không có dấu / ở cuối)
+BASE_URL = "https://secure-chat-deployed.onrender.com"
 
 class NetworkClient:
     def __init__(self):
@@ -20,18 +21,28 @@ class NetworkClient:
             ts = str(time.time())
             data = f"{method}{path}{ts}".encode() + body
             sig = sign_data(self.sk_hex, data)
-            h.update({"X-User-ID": self.username, "X-Timestamp": ts, "X-Signature": sig})
+            h.update({
+                "X-User-ID": self.username, 
+                "X-Timestamp": ts, 
+                "X-Signature": sig
+            })
         return h
 
     def post(self, ep, data):
         url = BASE_URL + ep
         body = json.dumps(data).encode()
         try:
-            return requests.post(url, data=body, headers=self._headers("POST", ep, body)).json()
-        except: return None
+            res = requests.post(url, data=body, headers=self._headers("POST", ep, body))
+            return res.json()
+        except Exception as e:
+            print(f"Network Error POST: {e}")
+            return None
 
     def get(self, ep, params=None):
         url = BASE_URL + ep
         try:
-            return requests.get(url, params=params, headers=self._headers("GET", ep)).json()
-        except: return None
+            res = requests.get(url, params=params, headers=self._headers("GET", ep))
+            return res.json()
+        except Exception as e:
+            print(f"Network Error GET: {e}")
+            return None

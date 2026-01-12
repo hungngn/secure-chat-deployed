@@ -5,7 +5,7 @@ class LoginScreen(ctk.CTkFrame):
         super().__init__(parent)
         self.controller = controller
         
-        ctk.CTkLabel(self, text="SECURE CHAT", font=("Arial", 30)).pack(pady=40)
+        ctk.CTkLabel(self, text="SECRET SHARE", font=("Arial", 30)).pack(pady=40)
         
         self.user = ctk.CTkEntry(self, placeholder_text="Username")
         self.user.pack(pady=10)
@@ -18,14 +18,19 @@ class LoginScreen(ctk.CTkFrame):
 
     def do_login(self):
         u, p = self.user.get(), self.pwd.get()
-        if self.controller.login(u, p, False):
-            main_app = self.winfo_toplevel()
-            main_app.show_chat(u)
+        if u and p:
+            # Gọi controller để mở Vault hiện có
+            if self.controller.login(u, p, is_register=False):
+                print(f"DEBUG: Login success for {u}")
+                main_app = self.winfo_toplevel()
+                main_app.show_chat(u)
+            else:
+                print("DEBUG: Login failed - Check username/password or DB file")
 
     def do_register(self):
         u, p = self.user.get(), self.pwd.get()
-        if self.controller.login(u, p, True):
-            print("Registered!")
-
-            main_app = self.winfo_toplevel()
-            main_app.show_chat(u)
+        if u and p:
+            if self.controller.login(u, p, is_register=True):
+                print(f"DEBUG: Registered and logged in as {u}")
+                main_app = self.winfo_toplevel()
+                main_app.show_chat(u)

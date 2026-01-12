@@ -1,19 +1,17 @@
-# client/gui/app.py
 import customtkinter as ctk
 from client.core.controller import Controller
 from .login_screen import LoginScreen
 from .chat_screen import ChatScreen
 
-ctk.set_appearance_mode("Dark")
-
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.geometry("800x600")
-        self.title("SecureChat")
+        self.geometry("900x650")
+        self.title("SecretShare")
+        self.configure(fg_color="#1A2130")
         
         self.controller = Controller(self)
-        self.container = ctk.CTkFrame(self)
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
         self.container.pack(fill="both", expand=True)
         
         self.show_login()
@@ -28,12 +26,10 @@ class App(ctk.CTk):
         self.chat_view.pack(fill="both", expand=True)
 
     def on_new_message(self, friend, text, is_me):
-        # Callback từ Controller đẩy lên GUI
         if hasattr(self, 'chat_view'):
-            if is_me:
-                self.chat_view.add_bubble(text, "blue")
-            else:
-                self.chat_view.on_msg(friend, text)
+            # is_me=True -> màu blue (Bronze), is_me=False -> màu friend
+            color = "blue" if is_me else "green" 
+            self.chat_view.add_bubble(text, color)
 
 if __name__ == "__main__":
     app = App()
