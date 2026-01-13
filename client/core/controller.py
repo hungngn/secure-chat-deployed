@@ -1,9 +1,11 @@
-import os
-import base64
 import threading
 import time
-from client.core.local_vault import LocalVault
+import os
+import base64
+import json
+
 from client.core.network import NetworkClient
+from client.core.local_vault import LocalVault
 from lib.crypto import generate_identity_keys, generate_dh_keypair
 from lib.ratchet import RatchetSession
 
@@ -18,30 +20,22 @@ class Controller:
     def login(self, username, password, is_register=False):
         self.vault = LocalVault(f"{username}.db")
         if not self.vault.login(password): return False
-        
         data = self.vault.load_identity()
+        
         if is_register:
-            if data: return True
+            if data: return self.login(username, password, False)
             sk, vk = generate_identity_keys()
             pre_dh = generate_dh_keypair()
-            pre_priv = pre_dh.private_key.to_string().hex()
-            payload = {
-                "username": username,
-                "identity_public_key": vk.to_string().hex(),
-                "prekey_bundle": pre_dh.get_public_key().to_string().hex()
-            }
-            res = self.net.post("/register", payload)
-            if res and res.get("status") == "ok":
+            payload = {"username": username, "identity_public_key": vk.to_string().hex(), 
+                       "prekey_bundle": pre_dh.get_public_key().to_string().hex()}
+            if self.net.post("/register", payload):
                 self.vault.save_identity(username, sk.to_string().hex())
-                self.vault._save('identity', 'prekey_private', {"pk": pre_priv})
+                self.vault._save('identity', 'prekey_private', {"pk": pre_dh.private_key.to_string().hex()})
                 self.net.set_identity(username, sk.to_string().hex())
-                self.start_polling()
-                return True
-        else:
-            if data:
-                self.net.set_identity(username, data['sk'])
-                self.start_polling()
-                return True
+                self.start_polling(); return True
+        elif data and data['username'] == username:
+            self.net.set_identity(username, data['sk'])
+            self.start_polling(); return True
         return False
 
     def get_session(self, friend):
@@ -63,11 +57,8 @@ class Controller:
         sess = self.get_session(friend)
         if not sess: return
         packet = sess.encrypt(text.encode())
-        blob = packet['iv'] + packet['tag'] + packet['ciphertext']
-        payload = {"to_user": friend, "encrypted_content": blob, "header": packet['header']}
-        
+        payload = {"to_user": friend, "encrypted_content": packet['iv'] + packet['tag'] + packet['ciphertext'], "header": packet['header']}
         if self.net.post("/send", payload):
-            # Ghi vào DB cục bộ
             self.vault.save_message(friend, text, True)
             self.vault.save_session(friend, sess.get_state())
             self.app.on_new_message(friend, text, True)
@@ -75,22 +66,20 @@ class Controller:
     def send_file(self, friend, file_path):
         sess = self.get_session(friend)
         if not sess: return
-        file_name = os.path.basename(file_path)
-        with open(file_path, "rb") as f:
-            content = base64.b64encode(f.read()).decode()
-        
-        raw_data = f"FILE_SHARE|{file_name}|{content}"
-        packet = sess.encrypt(raw_data.encode())
-        blob = packet['iv'] + packet['tag'] + packet['ciphertext']
-        payload = {"to_user": friend, "encrypted_content": blob, "header": packet['header']}
-        
-        if self.net.post("/send", payload):
-            # Ghi vào DB cục bộ dạng marker file
-            self.vault.save_message(friend, raw_data, True)
-            self.vault.save_session(friend, sess.get_state())
-            self.app.on_new_message(friend, raw_data, True)
+        try:
+            fname = os.path.basename(file_path)
+            with open(file_path, "rb") as f: content = base64.b64encode(f.read()).decode()
+            raw = f"FILE_SHARE|{fname}|{content}"
+            packet = sess.encrypt(raw.encode())
+            payload = {"to_user": friend, "encrypted_content": packet['iv'] + packet['tag'] + packet['ciphertext'], "header": packet['header']}
+            if self.net.post("/send", payload):
+                self.vault.save_message(friend, raw, True)
+                self.vault.save_session(friend, sess.get_state())
+                self.app.on_new_message(friend, raw, True)
+        except: pass
 
     def start_polling(self):
+        self.running = True
         threading.Thread(target=self._poll_loop, daemon=True).start()
 
     def _poll_loop(self):
@@ -108,9 +97,9 @@ class Controller:
                             self.sessions[sender] = sess
                         try:
                             pt = sess.decrypt(packet).decode()
-                            self.vault.save_message(sender, pt, False) # Lưu lịch sử nhận
+                            self.vault.save_message(sender, pt, False)
                             self.vault.save_session(sender, sess.get_state())
-                            self.app.on_new_message(sender, pt, False)
-                        except Exception as e: print(f"Decrypt Error: {e}")
-            except: pass
-            time.sleep(2)
+                            if self.app: self.app.after(0, lambda s=sender, t=pt: self.app.on_new_message(s, t, False))
+                        except: pass
+                time.sleep(2)
+            except: time.sleep(5)
